@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: mouhareb/springboot-app:latest
+          ports:
+            - containerPort: 8089  # The port the backend listens on in docker image
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+spec:
+  type: NodePort
+  ports:
+    - port: 8089          # Internal service port
+      targetPort: 8089    # Port the backend listens on
+      nodePort: 30001     # different than jenkins
+  selector:
+    app: backend
