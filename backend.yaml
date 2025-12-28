@@ -1,3 +1,125 @@
+# ---------------------------
+# 1) Secret for MySQL password
+# ---------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-secret
+type: Opaque
+stringData:
+  MYSQL_ROOT_PASSWORD: "rootpass"   # change this
+  MYSQL_PASSWORD: "appPass123"      # change this
+
+---
+# ---------------------------
+# 2) ConfigMap for MySQL + app db name/user
+# ---------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+data:
+  MYSQL_DATABASE: "TPProjet"
+  MYSQL_USER: "tpuser"
+
+---
+# ---------------------------
+# 3) Persistent Volume Claim for MySQL data
+# ---------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+# ---------------------------
+# 4) MySQL Deployment
+# ---------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: mysql-config
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: mysql-config
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_ROOT_PASSWORD
+          volumeMounts:
+            - name: mysql-storage
+              mountPath: /var/lib/mysql
+          # Optional but recommended
+          readinessProbe:
+            tcpSocket:
+              port: 3306
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 3306
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: mysql-storage
+          persistentVolumeClaim:
+            claimName: mysql-pvc
+
+---
+# ---------------------------
+# 5) MySQL Service (internal only)
+# ---------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3306
+      targetPort: 3306
+  selector:
+    app: mysql
+
+---
+# ---------------------------
+# 6) Backend Deployment (updated to use mysql-service DNS)
+# ---------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,8 +138,33 @@ spec:
         - name: backend
           image: mouhareb/springboot-app:latest
           ports:
-            - containerPort: 8089  # The port the backend listens on in docker image
+            - containerPort: 8089
+          env:
+            # DB host is the service name in Kubernetes DNS
+            - name: DB_HOST
+              value: "mysql-service"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: mysql-config
+                  key: MYSQL_DATABASE
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: mysql-config
+                  key: MYSQL_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
+
 ---
+# ---------------------------
+# 7) Backend Service (NodePort stays)
+# ---------------------------
 apiVersion: v1
 kind: Service
 metadata:
@@ -25,8 +172,8 @@ metadata:
 spec:
   type: NodePort
   ports:
-    - port: 8089          # Internal service port
-      targetPort: 8089    # Port the backend listens on
-      nodePort: 30001     # different than jenkins
+    - port: 8089
+      targetPort: 8089
+      nodePort: 30001
   selector:
     app: backend
